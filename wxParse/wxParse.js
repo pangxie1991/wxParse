@@ -1,10 +1,17 @@
 /**
+ * 我们已经自己修改过，请勿直接替换 github 上的代码
+ * 修复：
+ *   1. 第一次加载时，图片会有明显的大小缩放
+ *   2. 下拉刷新以后，图片不会调整大小
+ */
+
+/**
  * author: Di (微信小程序开发工程师)
  * organization: WeAppDev(微信小程序开发论坛)(http://weappdev.com)
  *               垂直微信小程序开发交流社区
- * 
+ *
  * github地址: https://github.com/icindy/wxParse
- * 
+ *
  * for: 微信小程序富文本解析
  * detail : http://weappdev.com/t/wxparse-alpha0-1-html-markdown/184
  */
@@ -25,10 +32,13 @@ wx.getSystemInfo({
     realWindowHeight = res.windowHeight
   }
 })
+
+const picRectData = {};
+
 /**
  * 主函数入口区
  **/
-function wxParse(bindName = 'wxParseData', type='html', data='<div class="color:red;">数据不能为空</div>', target,imagePadding) {
+function wxParse(bindName = 'wxParseData', type='html', data='<div class="color:red;">数据不能为空</div>', target, imagePadding) {
   var that = target;
   var transData = {};//存放转化后的数据
   if (type == 'html') {
@@ -45,6 +55,7 @@ function wxParse(bindName = 'wxParseData', type='html', data='<div class="color:
   if(typeof(imagePadding) != 'undefined'){
     transData.view.imagePadding = imagePadding
   }
+  resolvePicData(transData, that, bindName);
   var bindData = {};
   bindData[bindName] = transData;
   that.setData(bindData)
@@ -56,16 +67,17 @@ function wxParseImgTap(e) {
   var that = this;
   var nowImgUrl = e.target.dataset.src;
   var tagFrom = e.target.dataset.from;
+  var temData = readData(that.data, tagFrom);
   if (typeof (tagFrom) != 'undefined' && tagFrom.length > 0) {
     wx.previewImage({
       current: nowImgUrl, // 当前显示图片的http链接
-      urls: that.data[tagFrom].imageUrls // 需要预览的图片http链接列表
+      urls: temData.imageUrls // 需要预览的图片http链接列表
     })
   }
 }
 
 /**
- * 图片视觉宽高计算函数区 
+ * 图片视觉宽高计算函数区
  **/
 function wxParseImgLoad(e) {
   var that = this;
@@ -73,23 +85,30 @@ function wxParseImgLoad(e) {
   var idx = e.target.dataset.idx;
   if (typeof (tagFrom) != 'undefined' && tagFrom.length > 0) {
     calMoreImageInfo(e, idx, that, tagFrom)
-  } 
+  }
 }
 // 假循环获取计算图片视觉最佳宽高
 function calMoreImageInfo(e, idx, that, bindName) {
-  var temData = that.data[bindName];
+  var temData = readData(that.data, bindName);
   if (!temData || temData.images.length == 0) {
     return;
   }
   var temImages = temData.images;
   //因为无法获取view宽度 需要自定义padding进行计算，稍后处理
-  var recal = wxAutoImageCal(e.detail.width, e.detail.height,that,bindName); 
+  var recal = wxAutoImageCal(e.detail.width, e.detail.height,that,bindName);
   // temImages[idx].width = recal.imageWidth;
-  // temImages[idx].height = recal.imageheight; 
+  // temImages[idx].height = recal.imageheight;
   // temData.images = temImages;
   // var bindData = {};
   // bindData[bindName] = temData;
   // that.setData(bindData);
+
+  const src = e.target.dataset.src;
+  picRectData[src] = {
+    width: e.detail.width,
+    height: e.detail.height
+  };
+
   var index = temImages[idx].index
   var key = `${bindName}`
   for (var i of index.split('.')) key+=`.nodes[${i}]`
@@ -98,6 +117,7 @@ function calMoreImageInfo(e, idx, that, bindName) {
   that.setData({
     [keyW]: recal.imageWidth,
     [keyH]: recal.imageheight,
+    [`${key.showImg}`]: true
   })
 }
 
@@ -107,7 +127,8 @@ function wxAutoImageCal(originalWidth, originalHeight,that,bindName) {
   var windowWidth = 0, windowHeight = 0;
   var autoWidth = 0, autoHeight = 0;
   var results = {};
-  var padding = that.data[bindName].view.imagePadding;
+  var temData = readData(that.data, bindName);
+  var padding = temData.view.imagePadding;
   windowWidth = realWindowWidth-2*padding;
   windowHeight = realWindowHeight;
   //判断按照那种方式进行缩放
@@ -143,11 +164,60 @@ function wxParseTemArray(temArrayName,bindNameReg,total,that){
 
 /**
  * 配置emojis
- * 
+ *
  */
 
 function emojisInit(reg='',baseSrc="/wxParse/emojis/",emojis){
    HtmlToJson.emojisInit(reg,baseSrc,emojis);
+}
+
+// 递归读取 data
+// 新增
+function readData(source, key = '') {
+  if (!key) {
+    return null;
+  }
+
+  if (key[0] === '.') {
+    key = key.slice(1);
+  }
+
+  const keyArray = key.split('.');
+  let result = source;
+  for (let i = 0; i < keyArray.length; i ++) {
+    result = result[keyArray[i]];
+
+    if (!result) break;
+  }
+
+  return result;
+}
+
+function resolvePicData(transData, that, bindName) {
+  const temImages = transData.images;
+  if (!temImages) {
+    return;
+  }
+
+  temImages.forEach((imgData, index) => {
+    if (!picRectData[imgData.attr.src]) {
+      return;
+    }
+
+    let key = '';
+    for (var i of imgData.index.split('.')) key +=`.nodes.${i}`;
+
+    const picOriginRectData = picRectData[imgData.attr.src];
+    const nodeData = readData(transData, key);
+    const rectData = wxAutoImageCal(picOriginRectData.width, picOriginRectData.height, that, bindName);
+    nodeData.width = rectData.imageWidth;
+    nodeData.height = rectData.imageheight;
+    nodeData.showImg = true;
+    // 设置宽高
+    // nodeData.width = 1;
+    // nodeData.height = 1;
+    // nodeData.showImg = true;
+  });
 }
 
 module.exports = {
