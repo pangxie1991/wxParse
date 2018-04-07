@@ -96,6 +96,7 @@
 .wxParse-img{
     /*background-color: #efefef;*/
     overflow: hidden;
+    vertical-align: bottom;
 }
 
 .wxParse-blockquote {
